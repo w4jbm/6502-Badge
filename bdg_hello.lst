@@ -1,0 +1,80 @@
+
+; 64tass Turbo Assembler Macro V1.55.2200 listing file
+; 64tass --intel-hex -o bdg_hello.hex -m --verbose-list -L bdg_hello.lst bdg_hello.a65
+; Sun Jan 17 13:05:57 2021
+
+;Offset	;Hex		;Source
+
+;******  Processing input file: bdg_hello.a65
+
+			; Hello World test for the 6502 Badge, kits available from Lee Hart
+			;
+			; This version by Jim McClanahan, W4JBM, January 2021
+			;
+
+			; Define routines in the Badge's ROM that we'll be using...
+=$ffc3			xReset	= $FFC3	; Cold start of the system
+=$eb76			xPr2By	= $EB76	; Prints AAXX hex digits
+=$eb7a			xPr1By	= $EB7A	; Prints AA hex digits
+=$eb83			xPrDig	= $EB83	; Prints A hex nibble (low 4 bits)
+=$eb69			xPrCR	= $EB69	; Prints a CR (ASCII 13)and LF (ASCII 10)
+=$eb92			xPrXSP	= $EB92	; Prints # of spaces in X Reg
+=$eb97			xPr2SP	= $EB97 ; Prints 2 spaces
+=$eb9a			xPr1SP	= $EB9A	; Prints 1 space
+			; Input buffer is located at $0300.
+=$0300			xBuffr	= $0300	; Input buffer area
+			; Note: Doing an LDA #xx and jumping to xInput+2 allows you to change
+			;       the input prompt. The logic allows the monitor to have different
+			;       prompts while in assembler mode.
+=$eb9f			xInpAs	= $EB9F	; Alternate input prompt for Assembler
+=$eba2			xInput	= $EBA2	; Print <CR> and prompt then get a line of input, store at buffer
+=$eb39			xInChr	= $EB39	; Get one byte from input port, waits for input
+=$eb50			xScnIn	= $EB50	; Checks for an input character (no waiting)
+=$eaec			xOutpt	= $EAEC	; Send one byte to the output port
+=$ec06			xBell	= $EC06	; Send Ctrl-G ($07 / Bell) to output port
+
+
+			; Keys and Characters
+=$08			BS	= $08	; Backspace Key
+
+
+			; Page Zero Locations
+=$11			MSGL	= $11
+=$12			MSGH	= $12
+			; (These are used by ehBASIC as working locations.)
+
+			; We can load this towards the top of the 32K of RAM...
+			*	= $7000
+
+
+
+			; Note: For the 6502 Badge, the serial input is directly on the
+			;       NMI line. Because of that, this monitor does not include
+			;       the CLI to clear interupts that you might expect. We let
+			;       the rest of the system handle interupts and don't do some
+			;       of the housekeeping you would normally expect of a monitor.
+.7000	d8		HWRLD:	CLD		; Clear decimal arithmetic mode.
+.7001	20 69 eb		JSR xPrCR	; Print CR/LF
+.7004	a9 22			LDA #<MSG1	; Load Message Address into Page Zero
+.7006	85 11			STA MSGL
+.7008	a9 70			LDA #>MSG1
+.700a	85 12			STA MSGH
+.700c	20 15 70		JSR SHWMSG	; Jump to Show Message subroutine
+.700f	20 69 eb		JSR xPrCR	; Print CR/LF
+.7012	4c 12 70	LOOP:	JMP LOOP	; Now just loop endlessly...
+
+.7015	a0 00		SHWMSG:	LDY #$0		; Show Message Subroutine
+.7017	b1 11		PRINT:	LDA (MSGL),Y	; Use Page Zero Pointer and offset
+.7019	f0 06			BEQ DONE	; Did we just load a $00 end-of-string?
+.701b	20 ec ea		JSR xOutpt	; If not, print it
+.701e	c8			INY		; Point to next character
+.701f	d0 f6			BNE PRINT	; Branch to do it again...
+.7021	60		DONE:	RTS		; Jump here at end-of-string or 256 characters
+
+			; Our message follows...
+>7022	48 65 6c 6c	MSG1:	.NULL "Hello, World!"
+>7026	6f 2c 20 57 6f 72 6c 64 21 00
+
+			.END
+
+;******  End of listing

@@ -1,0 +1,75 @@
+; Hello World test for the 6502 Badge, kits available from Lee Hart
+;
+; This version by Jim McClanahan, W4JBM, January 2021
+;
+; Build with:
+; $ 64tass --intel-hex bdg_hello.a65 -o bdg_hello.hex -m --verbose-list -L bdg_hello.lst
+; $ ./hex2bmon.py bdg_hello.hex bdg_hello.mon
+;
+; bdg_hello.mon is in the proper format to be pasted into the 6502
+; Badge's monitor program.
+
+; Define routines in the Badge's ROM that we'll be using...
+xReset	= $FFC3	; Cold start of the system
+xPr2By	= $EB76	; Prints AAXX hex digits
+xPr1By	= $EB7A	; Prints AA hex digits
+xPrDig	= $EB83	; Prints A hex nibble (low 4 bits)
+xPrCR	= $EB69	; Prints a CR (ASCII 13)and LF (ASCII 10)
+xPrXSP	= $EB92	; Prints # of spaces in X Reg
+xPr2SP	= $EB97 ; Prints 2 spaces
+xPr1SP	= $EB9A	; Prints 1 space
+; Input buffer is located at $0300.
+xBuffr	= $0300	; Input buffer area
+; Note: Doing an LDA #xx and jumping to xInput+2 allows you to change
+;       the input prompt. The logic allows the monitor to have different
+;       prompts while in assembler mode.
+xInpAs	= $EB9F	; Alternate input prompt for Assembler
+xInput	= $EBA2	; Print <CR> and prompt then get a line of input, store at buffer
+xInChr	= $EB39	; Get one byte from input port, waits for input
+xScnIn	= $EB50	; Checks for an input character (no waiting)
+xOutpt	= $EAEC	; Send one byte to the output port
+xBell	= $EC06	; Send Ctrl-G ($07 / Bell) to output port
+
+
+; Keys and Characters
+BS	= $08	; Backspace Key
+
+
+; Page Zero Locations
+MSGL	= $11
+MSGH	= $12
+; (These are used by ehBASIC as working locations.)
+
+; We can load this towards the top of the 32K of RAM...
+*	= $7000
+
+
+
+; Note: For the 6502 Badge, the serial input is directly on the
+;       NMI line. Because of that, this monitor does not include
+;       the CLI to clear interupts that you might expect. We let
+;       the rest of the system handle interupts and don't do some
+;       of the housekeeping you would normally expect of a monitor.
+HWRLD:	CLD		; Clear decimal arithmetic mode.
+	JSR xPrCR	; Print CR/LF
+	LDA #<MSG1	; Load Message Address into Page Zero
+	STA MSGL
+	LDA #>MSG1
+	STA MSGH
+	JSR SHWMSG	; Jump to Show Message subroutine
+	JSR xPrCR	; Print CR/LF
+LOOP:	JMP LOOP	; Now just loop endlessly...
+
+SHWMSG:	LDY #$0		; Show Message Subroutine
+PRINT:	LDA (MSGL),Y	; Use Page Zero Pointer and offset
+	BEQ DONE	; Did we just load a $00 end-of-string?
+	JSR xOutpt	; If not, print it
+	INY		; Point to next character
+	BNE PRINT	; Branch to do it again...
+DONE:	RTS		; Jump here at end-of-string or 256 characters
+
+; Our message follows...
+MSG1:	.NULL "Hello, World!"
+
+.END
+
