@@ -28,11 +28,12 @@ with open(sys.argv[1]) as f1:
                 for x in range(num_dig):
                     if x == 16:
                         xa = int(line[3:7],16) + 16
-                        temp_line += '\n' + '{0:04X}'.format(xa) + ':'
+                        temp_line += '\r\n' + '{0:04X}'.format(xa) + ':'
                     x1 = x*2 + 9
                     x2 = x*2 + 11
                     temp_line += line[x1:x2] + ' '
 #               print("%s" % temp_line)
-                temp_line += '\n'
+                temp_line += '\r\n'
                 f2.write(temp_line)
+        f2.write("\r\n")
 
