@@ -1,0 +1,387 @@
+
+; 64tass Turbo Assembler Macro V1.55.2200 listing file
+; 64tass --intel-hex -o EWoz_bdg.hex -m --verbose-list -L EWoz_bdg.lst EWoz_bdg.a65
+; Mon Jan 18 14:34:01 2021
+
+;Offset	;Hex		;Source
+
+;******  Processing input file: EWoz_bdg.a65
+
+			; EWoz Monitor v1.0B
+			;
+			; Modified to work on the 6502 Badge, kits available from Lee Hart
+			;
+			; This version by Jim McClanahan, W4JBM, January 2021
+			;
+			; Build with:
+			; $ 64tass --intel-hex ewozb.a65 -o ewozb.hex -m --verbose-list -L ewozb.lst
+			; $ ./hex2bmon ewozb.hex ewozb.mon
+			;
+			; Based on EWoz 1.0 by fsafstrom, March 2007. Relevant notes from original:
+			;
+			; The EWoz 1.0 is just the good old Woz mon with a few improvements and extensions so to say.
+			;
+			; It prints a small welcome message when started.
+			; All key strokes are converted to uppercase.
+			; The backspace works so the _ is no longer needed.
+			; When you run a program, it's called with an JSR so if the program ends
+			;   with an RTS, you will be taken back to the monitor.
+			; You can load Intel HEX format files and it keeps track of the checksum.
+			; To load an Intel Hex file, just type L and hit return.
+			;   Now just send a Text file that is in the Intel HEX Format just as you
+			;   would send a text file for the Woz mon. You can abort the transfer by
+			;   hitting ESC.
+			;
+			; I have also incorporated some changes from the Glitch Works and TangentDelta
+			; version created for the R65x1Q SBC.
+			;
+			; Notes for this version (1.0B as in 'Badge'):
+			;
+			; Currently designed to load into RAM.
+			; Makes use of I/O routines in the Badge's ROM.
+			; May clobber Page Zero locations used by other applications, so you should
+			;   probably cold start anything else like ehBASIC or the original monitor.
+			; Interupts are left enabled because they are necessary for serial input on
+			;   the Badge
+			;
+			;
+			; Define routines in the Badge's ROM that we'll be using...
+
+=$ffc3			xReset	= $FFC3	; Cold start of the system
+=$eb76			xPr2By	= $EB76	; Prints AAXX hex digits
+=$eb7a			xPr1By	= $EB7A	; Prints AA hex digits
+=$eb83			xPrDig	= $EB83	; Prints A hex nibble (low 4 bits)
+=$eb69			xPrCR	= $EB69	; Prints a CR (ASCII 13)and LF (ASCII 10)
+=$eb92			xPrXSP	= $EB92	; Prints # of spaces in X Reg
+=$eb97			xPr2SP	= $EB97 ; Prints 2 spaces
+=$eb9a			xPr1SP	= $EB9A	; Prints 1 space
+			; Input buffer is located at $0300.
+=$0300			xBuffr	= $0300	; Input buffer area
+			; Note: Doing an LDA #xx and jumping to xInput+2 allows you to change
+			;       the input prompt. The logic allows the monitor to have different
+			;       prompts while in assembler mode.
+=$eb9f			xInpAs	= $EB9F	; Alternate input prompt for Assembler
+=$eba2			xInput	= $EBA2	; Print <CR> and prompt then get a line of input, store at buffer
+=$eb39			xInChr	= $EB39	; Get one byte from input port, waits for input
+=$eb50			xScnIn	= $EB50	; Checks for an input character (no waiting)
+=$eaec			xOutpt	= $EAEC	; Send one byte to the output port
+=$ec06			xBell	= $EC06	; Send Ctrl-G ($07 / Bell) to output port
+
+			; Keys and Characters
+=$08			BS	= $08	; Backspace
+=$0a			LF	= $0A	; Line Feed
+=$0d			CR	= $0D	; Carriage Return
+=$1b			ESC	= $1B	; Escape
+=$20			SPC	= $20	; Space
+=$2e			DOT	= $2E	; Period
+=$3a			CLN	= $3A	; Colon
+
+=$0300			IN	= xBuffr	;Input Buffer
+			; Pointers conflict with ehBASIC!
+=$70			XAML	= $70		;*Index pointers
+=$71			XAMH	= $71
+=$72			STL	= $72
+=$73			STH	= $73
+=$74			L	= $74
+=$75			H	= $75
+=$76			YSAV	= $76
+=$77			MODE	= $77
+=$78			MSGL	= $78
+=$79			MSGH	= $79
+=$7a			COUNTR	= $7A
+=$7b			CRC	= $7B
+=$7c			CRCCHK	= $7C
+
+			; We can load this towards the top of the 32K of RAM...
+			;
+			*	= $7C00
+
+
+
+			; Note: For the 6502 Badge, the serial input is directly on the
+			;       NMI line. Because of that, this monitor does not include
+			;       the CLI to clear interupts that you might expect. We let
+			;       the rest of the system handle interupts and don't do some
+			;       of the housekeeping you would normally expect of a monitor.
+.7c00	d8		RESET:	CLD		; Clear decimal mode (just in case)
+.7c01	a2 ff			LDX #$FF	; Set up stack
+.7c03	9a			TXS
+.7c04	20 69 eb		JSR xPrCR	; Print CR/LF
+.7c07	a9 f0			LDA #<WLCMSG	; Load pointer to welcom message
+.7c09	85 78			STA MSGL	; into Page Zero
+.7c0b	a9 7d			LDA #>WLCMSG
+.7c0d	85 79			STA MSGH
+.7c0f	20 1a 7d		JSR SHWMSG	; Display welcome message
+			; SFTRST loads the Escape key. We drop through and this prints
+			; the initial prompt.
+.7c12	a9 1b		SFTRST:	LDA #ESC	; Load Escape key
+.7c14	c9 08		NOTCR:	CMP #BS		; Was it a backspace?
+.7c16	f0 11			BEQ BCKSPC
+.7c18	c9 1b			CMP #ESC	; Was it an Escape?
+.7c1a	f0 03			BEQ ESCAPE
+.7c1c	c8			INY		; Increment Buffer Index (Y)
+.7c1d	10 17			BPL NXTCHR	; 'Auto-Escape' if buffer >127
+.7c1f	a9 5c		ESCAPE:	LDA #'\'	; Load the prompt character ("\")
+.7c21	20 12 7d		JSR ECHO	; ...and display it
+.7c24	20 69 eb	GETLIN:	JSR xPrCR	; Print CR/LF
+.7c27	a0 01			LDY #$01	; Initialize Buffer Index (Y)
+.7c29	88		BCKSPC:	DEY		; If backspacing, decrement Buffer Index (Y)
+.7c2a	30 f8			BMI GETLIN	; If we backspace to far, start again
+.7c2c	a9 20			LDA #SPC	; Overwrite the backspaced char with Space
+.7c2e	20 12 7d		JSR ECHO
+.7c31	a9 08			LDA #BS		; And backspace again
+.7c33	20 12 7d		JSR ECHO
+.7c36	20 39 eb	NXTCHR:	JSR xInChr	; Get next incoming char
+.7c39	c9 60			CMP #$60	; Is it lower case?
+.7c3b	30 02			BMI CNVRT	; If not, skip ahead
+.7c3d	29 5f			AND #$5F	; Otherwise, convert to UPPER CASE
+			; CNVRT origially did an ORA #$80 which set the high bit. This is
+			; needed on the Apple to reset the high bit after conversion to
+			; upper case. We are just using ASCII so we can skip this.
+.7c3f	99 00 03	CNVRT:	STA IN,Y	; Add the character to the text buffer
+.7c42	20 12 7d		JSR ECHO	; Display it to the screen
+.7c45	c9 0d			CMP #CR		; Was it a carriage return?
+.7c47	d0 cb			BNE NOTCR	; If not, loop back for next character
+.7c49	a0 ff			LDY #$FF	; Reset text index.
+.7c4b	a9 00			LDA #$00	; For XAM mode.
+.7c4d	aa			TAX		; 0->X.
+.7c4e	0a		SETSTR:	ASL		; Leaves $7B if setting STOR mode.
+.7c4f	85 77		SETMOD:	STA MODE	; $00 = XAM, $7B = STOR, $AE = BLOK XAM.
+.7c51	c8		BLSKIP:	INY		; Advance text index.
+.7c52	b9 00 03	NXTITM:	LDA IN,Y	; Get character.
+.7c55	c9 0d			CMP #CR		; CR?
+.7c57	f0 cb			BEQ GETLIN	; Yes, done this line.
+.7c59	c9 2e			CMP #DOT	; "."?
+.7c5b	90 f4			BCC BLSKIP	; Skip delimiter.
+.7c5d	f0 f0			BEQ SETMOD	; vSet BLOCK XAM mode.
+.7c5f	c9 3a			CMP #':'	; ":"?
+.7c61	f0 eb			BEQ SETSTR	; Yes, set STOR mode.
+.7c63	c9 52			CMP #'R'	; "R"?
+.7c65	f0 31			BEQ RUN		; Yes, run user program.
+.7c67	c9 4c			CMP #'L'	; * "L"?
+.7c69	f0 36			BEQ LDINT	; * Yes, Load Intel Code.
+.7c6b	86 74			STX L		; $00->L.
+.7c6d	86 75			STX H		; and H.
+.7c6f	84 76			STY YSAV	; Save Y for comparison.
+.7c71	b9 00 03	NXTHEX:	LDA IN,Y	; Get character for hex test.
+.7c74	49 30			EOR #$30	; Map digits to $0-9.
+.7c76	c9 0a			CMP #$0A	; Digit?
+.7c78	90 06			BCC DIG		; Yes.
+.7c7a	69 88			ADC #$88	; Map letter "A"-"F" to $FA-FF.
+.7c7c	c9 fa			CMP #$FA	; Hex letter?
+.7c7e	90 11			BCC NOTHEX	; No, character not hex.
+.7c80	0a		DIG:	ASL
+.7c81	0a			ASL		; Hex digit to MSD of A.
+.7c82	0a			ASL
+.7c83	0a			ASL
+.7c84	a2 04			LDX #$04	; Shift count.
+.7c86	0a		HEXSFT:	ASL		; Hex digit left MSB to carry.
+.7c87	26 74			ROL L		; Rotate into LSD.
+.7c89	26 75			ROL H		; Rotate into MSD's.
+.7c8b	ca			DEX		; Done 4 shifts?
+.7c8c	d0 f8			BNE HEXSFT	; No, loop.
+.7c8e	c8			INY		; Advance text index.
+.7c8f	d0 e0			BNE NXTHEX	; Always taken. Check next character for hex.
+.7c91	c4 76		NOTHEX:	CPY YSAV	; Check if L, H empty (no hex digits).
+.7c93	d0 12			BNE NOESC	; * Branch out of range, had to improvise...
+.7c95	4c 12 7c		JMP SFTRST	; Yes, do a soft reset
+
+
+.7c98	20 9e 7c	RUN:	JSR ACTRUN	; * JSR to the Address we want to run.
+.7c9b	4c 12 7c		JMP SFTRST	; * When returned for the program, reset EWOZ.
+.7c9e	6c 70 00	ACTRUN:	JMP (XAML)	; Run at current XAM index.
+
+.7ca1	20 27 7d	LDINT:	JSR LDINTL	; * Load the Intel code.
+.7ca4	4c 12 7c		JMP SFTRST	; * When returned from the program, reset EWOZ.
+
+.7ca7	24 77		NOESC:	BIT MODE	; Test MODE byte.
+.7ca9	50 0d			BVC NOTSTR	; B6=0 for STOR, 1 for XAM and BLOCK XAM
+.7cab	a5 74			LDA L		; LSD's of hex data.
+.7cad	81 72			STA (STL,X)	; Store at current "store index".
+.7caf	e6 72			INC STL		; Increment store index.
+.7cb1	d0 9f			BNE NXTITM	; Get next item. (no carry).
+.7cb3	e6 73			INC STH		; Add carry to 'store index' high order.
+.7cb5	4c 52 7c	TONXIT:	JMP NXTITM	; Get next command item.
+
+.7cb8	a5 77		NOTSTR:	LDA MODE
+.7cba	c9 2e			CMP #DOT
+.7cbc	f0 29			BEQ XAMNXT
+.7cbe	a2 02			LDX #$02	; Byte count.
+.7cc0	b5 73		SETADR:	LDA L-1,X	; Copy hex data to
+.7cc2	95 71			STA STL-1,X	; "store index".
+.7cc4	95 6f			STA XAML-1,X	; And to "XAM index'.
+.7cc6	ca			DEX		; Next of 2 bytes.
+.7cc7	d0 f7			BNE SETADR	; Loop unless X = 0.
+.7cc9	d0 12		NXTPRN:	BNE PRDATA	; NE means no address to print.
+.7ccb	20 69 eb		JSR xPrCR	; Output CR/LF
+.7cce	a5 71			LDA XAMH	; 'Examine index' high-order byte.
+.7cd0	20 ff 7c		JSR PRBYTE	; Output it in hex format.
+.7cd3	a5 70			LDA XAML	; Low-order "examine index" byte.
+.7cd5	20 ff 7c		JSR PRBYTE	; Output it in hex format.
+.7cd8	a9 3a			LDA #':'	; ":".
+.7cda	20 12 7d		JSR ECHO	; Output it.
+.7cdd	a9 20		PRDATA:	LDA #SPC	; Blank.
+.7cdf	20 12 7d		JSR ECHO	; Output it.
+.7ce2	a1 70			LDA (XAML,X)	; Get data byte at 'examine index".
+.7ce4	20 ff 7c		JSR PRBYTE	; Output it in hex format.
+.7ce7	86 77		XAMNXT:	STX MODE	; 0-> MODE (XAM mode).
+.7ce9	a5 70			LDA XAML
+.7ceb	c5 74			CMP L		; Compare 'examine index" to hex data.
+.7ced	a5 71			LDA XAMH
+.7cef	e5 75			SBC H
+.7cf1	b0 c2			BCS TONXIT	; Not less, so no more data to output.
+.7cf3	e6 70			INC XAML
+.7cf5	d0 02			BNE MD8CHK	; Increment 'examine index".
+.7cf7	e6 71			INC XAMH
+.7cf9	a5 70		MD8CHK:	LDA XAML	; Check low-order 'exainine index' byte
+.7cfb	29 0f			AND #$0F	; For MOD 8=0 ** changed to $0F to get 16 values per row **
+.7cfd	10 ca			BPL NXTPRN	; Always taken.
+.7cff	48		PRBYTE:	PHA		; Save A for LSD.
+.7d00	4a			LSR
+.7d01	4a			LSR
+.7d02	4a			LSR		; MSD to LSD position.
+.7d03	4a			LSR
+.7d04	20 08 7d		JSR PRHEX	; Output hex digit.
+.7d07	68			PLA		; Restore A.
+.7d08	29 0f		PRHEX:	AND #$0F	; Mask LSD for hex print.
+.7d0a	09 30			ORA #'0'	; Add "0".
+.7d0c	c9 3a			CMP #$3A	; Digit?
+.7d0e	90 02			BCC ECHO	; Yes, output it.
+.7d10	69 06			ADC #$06	; Add offset for letter.
+.7d12	48		ECHO:	PHA		; *Save A
+.7d13	29 7f			AND #$7F        ; *Change to "standard ASCII"
+.7d15	20 ec ea		JSR xOutpt	; *Send it.
+.7d18	68			PLA		; *Restore A
+.7d19	60			RTS		; *Done, over and out...
+
+.7d1a	a0 00		SHWMSG:	LDY #$0
+.7d1c	b1 78		LPRT:	LDA (MSGL),Y
+.7d1e	f0 06			BEQ LDONE
+.7d20	20 12 7d		JSR ECHO
+.7d23	c8			INY
+.7d24	d0 f6			BNE LPRT
+.7d26	60		LDONE:	RTS
+
+
+			; Load an program in Intel Hex Format.
+.7d27	20 69 eb	LDINTL:	JSR xPrCR	; New line.
+.7d2a	a9 08			LDA #<MSG2
+.7d2c	85 78			STA MSGL
+.7d2e	a9 7e			LDA #>MSG2
+.7d30	85 79			STA MSGH
+.7d32	20 1a 7d		JSR SHWMSG	; Show Start Transfer.
+.7d35	a0 00			LDY #$00
+.7d37	84 7c			STY CRCCHK	; If CRCCHECK=0, all is good.
+.7d39	20 39 eb	INTLIN:	JSR xInChr	; Get char
+.7d3c	99 00 03		STA IN,Y	; Store it
+.7d3f	c8			INY		; Next
+.7d40	c9 1b			CMP #ESC	; Escape ?
+.7d42	f0 67			BEQ INTDON	; Yes, abort.
+.7d44	c9 0d			CMP #CR		; Did we find a new line ?
+.7d46	d0 f1			BNE INTLIN	; Nope, continue to scan line.
+.7d48	a0 ff			LDY #$FF	; Find (:)
+.7d4a	c8		FNDCOL:	INY
+.7d4b	b9 00 03		LDA IN,Y
+.7d4e	c9 3a			CMP #':'	; Is it Colon ?
+.7d50	d0 f8			BNE FNDCOL	; Nope, try next.
+.7d52	c8			INY		; Skip colon
+.7d53	a2 00			LDX #$00	; Zero in X
+.7d55	86 7b			STX CRC		; Zero Check sum
+.7d57	20 cd 7d		JSR GETHEX	; Get Number of bytes.
+.7d5a	85 7a			STA COUNTR	; Number of bytes in Counter.
+.7d5c	18			CLC		; Clear carry
+.7d5d	65 7b			ADC CRC		; Add CRC
+.7d5f	85 7b			STA CRC		; Store it
+.7d61	20 cd 7d		JSR GETHEX	; Get Hi byte
+.7d64	85 73			STA STH		; Store it
+.7d66	18			CLC		; Clear carry
+.7d67	65 7b			ADC CRC		; Add CRC
+.7d69	85 7b			STA CRC		; Store it
+.7d6b	20 cd 7d		JSR GETHEX	; Get Lo byte
+.7d6e	85 72			STA STL		; Store it
+.7d70	18			CLC		; Clear carry
+.7d71	65 7b			ADC CRC		; Add CRC
+.7d73	85 7b			STA CRC		; Store it
+.7d75	a9 2e			LDA #'.'	; Load "."
+.7d77	20 12 7d		JSR ECHO	; Print it to indicate activity.
+.7d7a	20 cd 7d	NODOT:	JSR GETHEX	; Get Control byte.
+.7d7d	c9 01			CMP #$01	; Is it a Termination record ?
+.7d7f	f0 2a			BEQ INTDON	; Yes, we are done.
+.7d81	18			CLC		; Clear carry
+.7d82	65 7b			ADC CRC		; Add CRC
+.7d84	85 7b			STA CRC		; Store it
+.7d86	20 cd 7d	INTSTR:	JSR GETHEX	; Get Data Byte
+.7d89	81 72			STA (STL,X)	; Store it
+.7d8b	18			CLC		; Clear carry
+.7d8c	65 7b			ADC CRC		; Add CRC
+.7d8e	85 7b			STA CRC		; Store it
+.7d90	e6 72			INC STL		; Next Address
+.7d92	d0 02			BNE TSTCNT	; Test to see if Hi byte needs INC
+.7d94	e6 73			INC STH		; If so, INC it.
+.7d96	c6 7a		TSTCNT:	DEC COUNTR	; Count down.
+.7d98	d0 ec			BNE INTSTR	; Next byte
+.7d9a	20 cd 7d		JSR GETHEX	; Get Checksum
+.7d9d	a0 00			LDY #$00	; Zero Y
+.7d9f	18			CLC		; Clear carry
+.7da0	65 7b			ADC CRC		; Add CRC
+.7da2	f0 95			BEQ INTLIN	; Checksum OK.
+.7da4	a9 01			LDA #$01	; Flag CRC error.
+.7da6	85 7c			STA CRCCHK	; Store it
+.7da8	4c 39 7d		JMP INTLIN	; Process next line.
+
+.7dab	a5 7c		INTDON:	LDA CRCCHK	; Test if everything is OK.
+.7dad	f0 0f			BEQ OKMSG	; Show OK message.
+.7daf	20 69 eb		JSR xPrCR	; New Line
+.7db2	a9 3d			LDA #<MSG4	; Load Error Message
+.7db4	85 78			STA MSGL
+.7db6	a9 7e			LDA #>MSG4
+.7db8	85 79			STA MSGH
+.7dba	20 1a 7d		JSR SHWMSG      ; Show Error.
+.7dbd	60			RTS
+
+.7dbe	20 69 eb	OKMSG:	JSR xPrCR	; New Line
+.7dc1	a9 24			LDA #<MSG3      ;Load OK Message.
+.7dc3	85 78			STA MSGL
+.7dc5	a9 7e			LDA #>MSG3
+.7dc7	85 79			STA MSGH
+.7dc9	20 1a 7d		JSR SHWMSG	; Show Done.
+.7dcc	60			RTS
+
+.7dcd	b9 00 03	GETHEX:	LDA IN,Y	; Get first char.
+.7dd0	49 30			EOR #$30
+.7dd2	c9 0a			CMP #$0A
+.7dd4	90 02			BCC DONE1
+.7dd6	69 08			ADC #$08
+.7dd8	0a		DONE1:	ASL
+.7dd9	0a			ASL
+.7dda	0a			ASL
+.7ddb	0a			ASL
+.7ddc	85 74			STA L
+.7dde	c8			INY
+.7ddf	b9 00 03		LDA IN,Y	; Get next char.
+.7de2	49 30			EOR #$30
+.7de4	c9 0a			CMP #$0A
+.7de6	90 02			BCC DONE2
+.7de8	69 08			ADC #$08
+.7dea	29 0f		DONE2:	AND #$0F
+.7dec	05 74			ORA L
+.7dee	c8			INY
+.7def	60			RTS
+
+			; Messages (null terminated)
+>7df0	57 65 6c 63	WLCMSG:	.NULL "Welcome to EWoz 1.0B.",CR,LF
+>7df4	6f 6d 65 20 74 6f 20 45 57 6f 7a 20 31 2e 30 42
+>7e04	2e 0d 0a 00
+>7e08	53 74 61 72	MSG2:	.NULL "Start Intel Hex Transfer.",CR,LF
+>7e0c	74 20 49 6e 74 65 6c 20 48 65 78 20 54 72 61 6e
+>7e1c	73 66 65 72 2e 0d 0a 00
+>7e24	49 6e 74 65	MSG3:	.NULL "Intel Hex Imported OK.",CR,LF
+>7e28	6c 20 48 65 78 20 49 6d 70 6f 72 74 65 64 20 4f
+>7e38	4b 2e 0d 0a 00
+>7e3d	49 6e 74 65	MSG4:	.NULL "Intel Hex Encountered Checksum Error.",CR,LF
+>7e41	6c 20 48 65 78 20 45 6e 63 6f 75 6e 74 65 72 65
+>7e51	64 20 43 68 65 63 6b 73 75 6d 20 45 72 72 6f 72
+>7e61	2e 0d 0a 00
+
+
+;******  End of listing
