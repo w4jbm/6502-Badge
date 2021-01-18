@@ -2,6 +2,13 @@
 
 Here are various items related to the 6502 Badge computer kit available from Lee Hart.
 
+# eWoz Monitor
+
+This is still best considered 'work in progress', but what I've tested seems to work. To get back to the Badge's monitor use `FFC3R` to run the reset code.
+
+It does use Page Zero locations used by ehBASIC, so they won't play well together.
+
+
 ## bdg_hello
 
 This is a Hello World example for the Badge that makes use of ROM routines. It is small enough to enter through the monitor, but I also have provided a .mon file that can be pasted into the monitor to save you the typing.
