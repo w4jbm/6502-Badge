@@ -13,6 +13,14 @@ It does use Page Zero locations used by ehBASIC, so they won't play well togethe
 
 This is a Hello World example for the Badge that makes use of ROM routines. It is small enough to enter through the monitor, but I also have provided a .mon file that can be pasted into the monitor to save you the typing.
 
+
+# proc_tst
+
+This is just some proof-of-concept code that checks for the type of processor in use. The 6502 Badge came with a Rockwell 65C02 and my tests seem to work with that. I am in the process of building a KIM-1 clone that will use an older NMOS 6502, so I plan to check the logic that checks for older processors on that.
+
+I thought about adding a check for the ROR bug (and still might at some point), but if you have one of those chips you would probably know it.
+
+
 ## hex2bmon.py
 
 This is a quick Python hack that will take an Intel Hex file and convert it to the format used by the Badge's monitor. I see this more as a convinient way to bootstrap a hex file loader to the platform than to support large file transfers since there is no error checking. But it is kind of handy to quickly build and test programs on the platform.
