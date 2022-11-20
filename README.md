@@ -2,7 +2,7 @@
 
 Here are various items related to the 6502 Badge computer kit available from Lee Hart.
 
-# eWoz Monitor
+## eWoz Monitor
 
 This is still best considered 'work in progress', but what I've tested seems to work. To get back to the Badge's monitor use `FFC3R` to run the reset code.
 
@@ -14,7 +14,7 @@ It does use Page Zero locations used by ehBASIC, so they won't play well togethe
 This is a Hello World example for the Badge that makes use of ROM routines. It is small enough to enter through the monitor, but I also have provided a .mon file that can be pasted into the monitor to save you the typing.
 
 
-# proc_tst
+## proc_tst
 
 This is just some proof-of-concept code that checks for the type of processor in use. The 6502 Badge came with a Rockwell 65C02 and my tests seem to work with that. I am in the process of building a KIM-1 clone that will use an older NMOS 6502, so I plan to check the logic that checks for older processors on that.
 
